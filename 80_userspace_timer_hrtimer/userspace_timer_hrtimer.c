@@ -7,12 +7,42 @@
 #include <linux/sched.h>
 #include <linux/ioctl.h>
 
-#define MYMAJOR 64
+#include <linux/hrtimer.h>
+#include <linux/jiffies.h>
+
+
+#define MYMAJOR 65
 
 /* Meta Information */
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Johannes 4 GNU/Linux");
-MODULE_DESCRIPTION("Kernel Module which sends a signal to an userspace app when GPIO 17 has a rising edge");
+MODULE_DESCRIPTION("Kernel Module which sync kernel hrtimer to userspace using signal");
+
+
+// https://blog.csdn.net/qq_21059825/article/details/118570280
+// https://docs.kernel.org/timers/hrtimers.html
+
+
+/* 1. insmod module*/
+// sudo insmod userspace_hr_timer.ko
+// dmesg | tail -n 10
+
+/* 2. make character mod */
+// rm /dev/userspace_hr_timer					# delete if had
+// sudo mknod /dev/userspace_hr_timer c 65 0   	# check MYMAJOR firstly
+// ls /dev/userspace_hr_timer -al				# check it
+// sudo chmod 666 /dev/userspace_hr_timer  # change permission
+// [ 4655.363860] start_t - now_t = 144932
+// [ 4655.383884] start_t - now_t = 144952
+// [ 4655.403908] start_t - now_t = 144972
+// [ 4655.423930] start_t - now_t = 144992
+// [ 4655.443956] start_t - now_t = 145012
+// [ 4655.463984] start_t - now_t = 145032
+// [ 4655.484006] start_t - now_t = 145052
+// [ 4655.504052] start_t - now_t = 145072
+// [ 4655.524086] start_t - now_t = 145092
+// [ 4655.544108] start_t - now_t = 145112
+
 
 /** variable contains pin number o interrupt controller to which GPIO 17 is mapped to */
 unsigned int irq_number;
@@ -24,23 +54,32 @@ static struct task_struct *task = NULL;
 /* define for Signal sending */
 #define SIGNR 44
 
-/**
- * @brief Interrupt service routine is called, when interrupt is triggered
- */
-static irq_handler_t gpio_irq_signal_handler(unsigned int irq, void *dev_id, struct pt_regs *regs) {
-	struct siginfo info;
-	printk("gpio_irq_signal: Interrupt was triggered and ISR was called!\n");
+/* hr timer */
+static struct hrtimer  my_hrtimer;
+u64 start_t;
 
-	if(task != NULL) {
+static enum hrtimer_restart test_hrtimer_handler(struct hrtimer *timer) {
+	/* Get current pid */
+	struct siginfo info;
+		if(task != NULL) {
 		memset(&info, 0, sizeof(info));
 		info.si_signo = SIGNR;
 		info.si_code = SI_QUEUE;
 
 		/* Send the signal */
-		if(send_sig_info(SIGNR, (struct siginfo *) &info, task) < 0) 
-			printk("gpio_irq_signal: Error sending signal\n");
+		if(send_sig_info(SIGNR, (struct siginfo *) &info, task) < 0) {
+			printk("hr_timer_callback: Error sending signal\n");
+		}else{
+			printk("hr_timer_callback: Success sync time\n");
+		}
 	}
-	return (irq_handler_t) IRQ_HANDLED; 
+
+	/* Get current time */
+	u64 now_t = jiffies;
+	printk("start_t - now_t = %u\n", jiffies_to_msecs(now_t - start_t));
+	hrtimer_start(&my_hrtimer, ms_to_ktime(20), HRTIMER_MODE_REL);
+
+	return HRTIMER_NORESTART;
 }
 
 /**
@@ -73,40 +112,19 @@ static struct file_operations fops = {
  * @brief This function is called, when the module is loaded into the kernel
  */
 static int __init ModuleInit(void) {
-	printk("qpio_irq: Loading module... ");
+	printk("Hello, Kernel!\n");
 
-	/* Setup the gpio */
-	if(gpio_request(17, "rpi-gpio-17")) {
-		printk("Error!\nCan not allocate GPIO 17\n");
-		return -1;
-	}
+	/* Init of hrtimer */
+	hrtimer_init(&my_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	my_hrtimer.function = &test_hrtimer_handler;
+	start_t = jiffies;
+	hrtimer_start(&my_hrtimer, ms_to_ktime(1000), HRTIMER_MODE_REL);
 
-	/* Set GPIO 17 direction */
-	if(gpio_direction_input(17)) {
-		printk("Error!\nCan not set GPIO 17 to input!\n");
-		gpio_free(17);
-		return -1;
-	}
-
-	gpio_set_debounce(17, 300);
-
-	/* Setup the interrupt */
-	irq_number = gpio_to_irq(17);
-
-	if(request_irq(irq_number, (irq_handler_t) gpio_irq_signal_handler, IRQF_TRIGGER_RISING, "my_gpio_irq_signal", NULL) != 0){
-		printk("Error!\nCan not request interrupt nr.: %d\n", irq_number);
-		gpio_free(17);
-		return -1;
-	}
-
-	if(register_chrdev(MYMAJOR, "gpio_irq_signal", &fops) < 0) {
+	if(register_chrdev(MYMAJOR, "userspace_hr_timer", &fops) < 0) {
 		printk("Error!\n Can't register device Number!\n");
-		gpio_free(17);
-		free_irq(irq_number, NULL);
 	}
 
 	printk("Done!\n");
-	printk("GPIO 17 is mapped to IRQ Nr.: %d\n", irq_number);
 	return 0;
 }
 
@@ -114,11 +132,11 @@ static int __init ModuleInit(void) {
  * @brief This function is called, when the module is removed from the kernel
  */
 static void __exit ModuleExit(void) {
-	printk("gpio_irq_signal: Unloading module... ");
-	free_irq(irq_number, NULL);
-	gpio_free(17);
-	unregister_chrdev(MYMAJOR, "gpio_irq_signal");
-	printk("Done!\n");
+	hrtimer_cancel(&my_hrtimer);
+	
+	unregister_chrdev(MYMAJOR, "userspace_hr_timer");
+
+	printk("Goodbye, Kernel\n");
 }
 
 module_init(ModuleInit);
