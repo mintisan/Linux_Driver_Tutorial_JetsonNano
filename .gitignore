@@ -80,3 +80,11 @@ GTAGS
 *~
 \#*#
 *.symvers
+
+*
+!*.c
+!*.h
+!*.dts
+!*.txt
+!*.md
+!Makefile
