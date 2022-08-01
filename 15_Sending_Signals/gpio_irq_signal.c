@@ -1,10 +1,16 @@
+#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/gpio.h>
 #include <linux/cdev.h>
 #include <linux/interrupt.h>
 #include <linux/fs.h>
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,11,0)
+#include <linux/signal.h>
+#else
 #include <linux/sched/signal.h>
+#endif
+#include <linux/sched.h>
 #include <linux/ioctl.h>
 
 #define MYMAJOR 64
@@ -37,7 +43,7 @@ static irq_handler_t gpio_irq_signal_handler(unsigned int irq, void *dev_id, str
 		info.si_code = SI_QUEUE;
 
 		/* Send the signal */
-		if(send_sig_info(SIGNR, (struct kernel_siginfo *) &info, task) < 0) 
+		if(send_sig_info(SIGNR, (struct siginfo *) &info, task) < 0) 
 			printk("gpio_irq_signal: Error sending signal\n");
 	}
 	return (irq_handler_t) IRQ_HANDLED; 
