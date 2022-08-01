@@ -4,7 +4,7 @@
 #include <linux/cdev.h>
 #include <linux/interrupt.h>
 #include <linux/fs.h>
-#include <linux/sched/signal.h>
+#include <linux/sched.h>
 #include <linux/ioctl.h>
 
 #define MYMAJOR 64
@@ -37,7 +37,7 @@ static irq_handler_t gpio_irq_signal_handler(unsigned int irq, void *dev_id, str
 		info.si_code = SI_QUEUE;
 
 		/* Send the signal */
-		if(send_sig_info(SIGNR, (struct kernel_siginfo *) &info, task) < 0) 
+		if(send_sig_info(SIGNR, (struct siginfo *) &info, task) < 0) 
 			printk("gpio_irq_signal: Error sending signal\n");
 	}
 	return (irq_handler_t) IRQ_HANDLED; 
